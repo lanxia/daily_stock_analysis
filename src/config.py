@@ -801,6 +801,7 @@ class Config:
     slack_webhook_url: Optional[str] = None  # Slack Incoming Webhook URL
     slack_bot_token: Optional[str] = None  # Slack Bot Token (xoxb-...)
     slack_channel_id: Optional[str] = None  # Slack 频道 ID (Bot 模式必填)
+    slack_mrkdwn_convert: bool = True  # 自动将 Markdown 转换为 Slack mrkdwn 方言
 
     # AstrBot 通知配置
     astrbot_token: Optional[str] = None
@@ -1595,6 +1596,7 @@ class Config:
             slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL'),
             slack_bot_token=os.getenv('SLACK_BOT_TOKEN'),
             slack_channel_id=os.getenv('SLACK_CHANNEL_ID'),
+            slack_mrkdwn_convert=parse_env_bool(os.getenv('SLACK_MRKDWN_CONVERT'), default=True),
             astrbot_url=os.getenv('ASTRBOT_URL'),
             astrbot_token=os.getenv('ASTRBOT_TOKEN'),
             notification_report_channels=parse_notification_route_channels(

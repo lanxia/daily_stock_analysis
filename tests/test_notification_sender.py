@@ -1267,7 +1267,7 @@ class TestSlackSender(unittest.TestCase):
         self.assertEqual(blocks[0]["text"]["type"], "mrkdwn")
 
     @mock.patch("src.notification_sender.slack_sender.requests.post")
-    def test_send_preserves_legacy_text_payload(self, mock_post):
+    def test_send_converts_markdown_to_mrkdwn_by_default(self, mock_post):
         resp = mock.MagicMock()
         resp.status_code = 200
         resp.text = "ok"
@@ -1279,8 +1279,11 @@ class TestSlackSender(unittest.TestCase):
 
         self.assertTrue(result)
         payload = json.loads(mock_post.call_args.kwargs["data"].decode("utf-8"))
-        self.assertIn("## 日报", payload["text"])
-        self.assertIn("[详情](https://example.com/report)", payload["text"])
+        # Header converted to bold, link converted to mrkdwn angle-bracket format
+        self.assertIn("日报", payload["text"])
+        self.assertNotIn("## 日报", payload["text"])
+        self.assertIn("https://example.com/report", payload["text"])
+        self.assertNotIn("[详情](https://example.com/report)", payload["text"])
 
     @mock.patch("src.notification_sender.slack_sender.requests.post")
     def test_send_text_prefers_bot_when_both_configured(self, mock_post):
@@ -1327,6 +1330,91 @@ class TestSlackSender(unittest.TestCase):
         sender = SlackSender(cfg)
         result = sender._send_slack_image(b"PNG_BYTES", fallback_content="fallback text")
         self.assertTrue(result)
+
+    # ------------------------------------------------------------------
+    # mrkdwn conversion tests
+    # ------------------------------------------------------------------
+
+    def test_to_mrkdwn_disabled_returns_original(self):
+        cfg = _config(slack_webhook_url="https://hooks.slack.com/services/T/B/xxx",
+                      slack_mrkdwn_convert=False)
+        sender = SlackSender(cfg)
+        original = "**bold** [link](http://x)"
+        self.assertEqual(sender._to_mrkdwn(original), original)
+
+    def test_to_mrkdwn_missing_lib_returns_original_and_warns(self):
+        cfg = _config(slack_webhook_url="https://hooks.slack.com/services/T/B/xxx",
+                      slack_mrkdwn_convert=True)
+        sender = SlackSender(cfg)
+        SlackSender._mrkdwn_import_warned = False
+        with mock.patch("src.notification_sender.slack_sender._MRKDWN_LIB_AVAILABLE", False), \
+             self.assertLogs("src.notification_sender.slack_sender", level="WARNING") as logs:
+            result = sender._to_mrkdwn("**bold**")
+        self.assertEqual(result, "**bold**")
+        self.assertTrue(any("markdown_to_mrkdwn" in line for line in logs.output))
+
+    def test_to_mrkdwn_missing_lib_warns_only_once(self):
+        cfg = _config(slack_webhook_url="https://hooks.slack.com/services/T/B/xxx",
+                      slack_mrkdwn_convert=True)
+        sender = SlackSender(cfg)
+        SlackSender._mrkdwn_import_warned = False
+        with mock.patch("src.notification_sender.slack_sender._MRKDWN_LIB_AVAILABLE", False), \
+             self.assertLogs("src.notification_sender.slack_sender", level="WARNING") as logs:
+            sender._to_mrkdwn("a")
+            sender._to_mrkdwn("b")
+        warning_lines = [l for l in logs.output if "markdown_to_mrkdwn" in l]
+        self.assertEqual(len(warning_lines), 1)
+
+    def test_to_mrkdwn_converter_exception_returns_original_and_warns(self):
+        cfg = _config(slack_webhook_url="https://hooks.slack.com/services/T/B/xxx",
+                      slack_mrkdwn_convert=True)
+        sender = SlackSender(cfg)
+        fake_converter = mock.MagicMock()
+        fake_converter.convert.side_effect = RuntimeError("conversion error")
+        fake_mod = mock.MagicMock()
+        fake_mod.SlackMarkdownConverter.return_value = fake_converter
+        with mock.patch("src.notification_sender.slack_sender._MRKDWN_LIB_AVAILABLE", True), \
+             mock.patch("src.notification_sender.slack_sender._m2m_mod", fake_mod), \
+             self.assertLogs("src.notification_sender.slack_sender", level="WARNING") as logs:
+            result = sender._to_mrkdwn("**bold**")
+        self.assertEqual(result, "**bold**")
+        self.assertTrue(any("回退原始内容" in line for line in logs.output))
+
+    @mock.patch("src.notification_sender.slack_sender.requests.post")
+    def test_send_applies_mrkdwn_conversion_to_payload(self, mock_post):
+        mock_post.return_value = _response(200)
+        mock_post.return_value.text = "ok"
+        cfg = _config(slack_webhook_url="https://hooks.slack.com/services/T/B/xxx",
+                      slack_mrkdwn_convert=True)
+        sender = SlackSender(cfg)
+        fake_converter = mock.MagicMock()
+        fake_converter.convert.return_value = "*bold* <http://x|link>"
+        fake_mod = mock.MagicMock()
+        fake_mod.SlackMarkdownConverter.return_value = fake_converter
+        with mock.patch("src.notification_sender.slack_sender._MRKDWN_LIB_AVAILABLE", True), \
+             mock.patch("src.notification_sender.slack_sender._m2m_mod", fake_mod):
+            result = sender.send_to_slack("**bold** [link](http://x)")
+        self.assertTrue(result)
+        payload = json.loads(mock_post.call_args.kwargs["data"].decode("utf-8"))
+        self.assertIn("*bold*", payload["text"])
+        self.assertIn("<http://x|link>", payload["text"])
+        self.assertNotIn("**bold**", payload["text"])
+
+    @mock.patch("src.notification_sender.slack_sender.requests.post")
+    def test_send_bypasses_conversion_when_disabled(self, mock_post):
+        mock_post.return_value = _response(200)
+        mock_post.return_value.text = "ok"
+        cfg = _config(slack_webhook_url="https://hooks.slack.com/services/T/B/xxx",
+                      slack_mrkdwn_convert=False)
+        sender = SlackSender(cfg)
+        fake_mod = mock.MagicMock()
+        with mock.patch("src.notification_sender.slack_sender._MRKDWN_LIB_AVAILABLE", True), \
+             mock.patch("src.notification_sender.slack_sender._m2m_mod", fake_mod):
+            result = sender.send_to_slack("**bold** [link](http://x)")
+        self.assertTrue(result)
+        fake_mod.SlackMarkdownConverter.assert_not_called()
+        payload = json.loads(mock_post.call_args.kwargs["data"].decode("utf-8"))
+        self.assertIn("**bold**", payload["text"])
 
 
 class TestTelegramSender(unittest.TestCase):

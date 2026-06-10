@@ -15,6 +15,13 @@ import requests
 from src.config import Config
 from src.formatters import chunk_content_by_max_bytes
 
+try:
+    import markdown_to_mrkdwn as _m2m_mod
+    _MRKDWN_LIB_AVAILABLE = True
+except ImportError:
+    _m2m_mod = None
+    _MRKDWN_LIB_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # Slack Block Kit 中单个 section block 的 text 字段上限为 3000 字符
@@ -24,6 +31,9 @@ _TEXT_LIMIT = 39000
 
 
 class SlackSender:
+
+    # 仅警告一次 markdown_to_mrkdwn 未安装
+    _mrkdwn_import_warned: bool = False
 
     def __init__(self, config: Config):
         """
@@ -36,6 +46,25 @@ class SlackSender:
         self._slack_bot_token = getattr(config, 'slack_bot_token', None)
         self._slack_channel_id = getattr(config, 'slack_channel_id', None)
         self._webhook_verify_ssl = getattr(config, 'webhook_verify_ssl', True)
+        self._slack_mrkdwn_convert = getattr(config, 'slack_mrkdwn_convert', True)
+
+    def _to_mrkdwn(self, content: str) -> str:
+        """将 Markdown 内容转换为 Slack mrkdwn 方言。"""
+        if not self._slack_mrkdwn_convert:
+            return content
+        if not _MRKDWN_LIB_AVAILABLE:
+            if not SlackSender._mrkdwn_import_warned:
+                logger.warning(
+                    "markdown_to_mrkdwn 未安装，Slack 消息将以原始 Markdown 发送。"
+                    "请执行 pip install -r requirements.txt 安装依赖。"
+                )
+                SlackSender._mrkdwn_import_warned = True
+            return content
+        try:
+            return _m2m_mod.SlackMarkdownConverter().convert(content)
+        except Exception as e:
+            logger.warning(f"Markdown 转换 mrkdwn 失败，回退原始内容: {e}")
+            return content
 
     @property
     def _use_bot(self) -> bool:
@@ -59,6 +88,7 @@ class SlackSender:
         Returns:
             是否发送成功
         """
+        content = self._to_mrkdwn(content)
         # 按字节分块，避免单条消息超限
         try:
             chunks = chunk_content_by_max_bytes(content, _TEXT_LIMIT, add_page_marker=True)
@@ -233,7 +263,7 @@ class SlackSender:
         # Webhook 模式或 Bot 上传失败：回退为文本
         if fallback_content:
             logger.info("Slack 图片不支持或失败，回退为文本发送")
-            return self.send_to_slack(fallback_content)
+            return self.send_to_slack(self._to_mrkdwn(fallback_content))
 
         logger.warning("Slack 图片发送失败，且无回退内容")
         return False

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] Slack 通知自动将 Markdown 转换为 Slack mrkdwn 方言（`**bold**` → `*bold*`、`[text](url)` → `<url|text>` 等），新增 `SLACK_MRKDWN_CONVERT` 开关（默认 `true`），依赖 `markdown-to-mrkdwn>=0.3.3`。
+
 - [修复] Web 个股栏和历史卡片在窄布局下不再让市场阶段标签遮挡股票名称。
 - [修复] 问股自由文本追问不再将 TTM、PE、YOY 等金融缩写误识别为新股票代码。
 - [修复] GitHub Actions 每日分析工作流读取 SearXNG 自建实例地址时支持 Variables 优先、Secrets 回退，修复仅配置 Variables 时 URL 不生效的问题。
