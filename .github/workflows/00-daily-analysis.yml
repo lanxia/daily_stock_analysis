@@ -332,7 +332,8 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
-          SLACK_MRKDWN_CONVERT: ${{ vars.SLACK_MRKDWN_CONVERT || secrets.SLACK_MRKDWN_CONVERT || 'true' }}
+          # 自动将标准 Markdown 转换为 Slack mrkdwn 方言；如需关闭直接改为 'false' 即可
+          SLACK_MRKDWN_CONVERT: 'true'
 
           # 通知路由策略（留空时保持全部已配置渠道）
           NOTIFICATION_REPORT_CHANNELS: ${{ vars.NOTIFICATION_REPORT_CHANNELS || secrets.NOTIFICATION_REPORT_CHANNELS }}
